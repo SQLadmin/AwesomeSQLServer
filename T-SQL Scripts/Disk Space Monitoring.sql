@@ -81,7 +81,9 @@ ORDER  BY [free space (gb)] ASC
 ----------------------------------------------
 /*** List all Databases and its file size ***/
 ----------------------------------------------
-------------------------------Data file size---------------------------- 
+
+--Data file size
+
 IF EXISTS (SELECT
     *
   FROM tempdb.sys.all_objects
@@ -113,7 +115,8 @@ from sys.database_files  where type=0 group by type'
 
 GO
 
--------------------log size-------------------------------------- 
+-- log file size
+
 IF EXISTS (SELECT
     *
   FROM tempdb.sys.all_objects
@@ -137,7 +140,9 @@ from sys.database_files  where type=1 group by type'
 
 
 GO
---------------------------------database free size 
+
+-- database free size 
+
 IF EXISTS (SELECT
     *
   FROM tempdb.sys.all_objects
@@ -199,7 +204,7 @@ FROM (
     LEFT JOIN sys.internal_tables it 
         ON p.object_id = it.object_id 
 ) AS partitions'
------------------------------------ 
+
 
 
 
