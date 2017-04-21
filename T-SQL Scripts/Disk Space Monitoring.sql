@@ -79,7 +79,7 @@ ORDER  BY [free space (gb)] ASC
 
 
 ----------------------------------------------
-/*** List all Databases and its file size ***/
+/*** 3. List all Databases and its file size ***/
 ----------------------------------------------
 
 --Data file size
