@@ -83,13 +83,7 @@ ORDER  BY [free space (gb)] ASC
 ----------------------------------------------
 
 --Data file size
-
-IF EXISTS (SELECT
-    *
-  FROM tempdb.sys.all_objects
-  WHERE name LIKE '%#dbsize%')
-  DROP TABLE #dbsize
-CREATE TABLE #dbsize (
+DECLARE @dbsize TABLE (
   Dbname sysname,
   dbstatus varchar(50),
   Recovery_Model varchar(40) DEFAULT ('NA'),
@@ -97,9 +91,8 @@ CREATE TABLE #dbsize (
   Space_Used_MB decimal(30, 2) DEFAULT (0),
   Free_Space_MB decimal(30, 2) DEFAULT (0)
 )
-GO
 
-INSERT INTO #dbsize (Dbname, dbstatus, Recovery_Model, file_Size_MB, Space_Used_MB, Free_Space_MB)
+INSERT INTO @dbsize (Dbname, dbstatus, Recovery_Model, file_Size_MB, Space_Used_MB, Free_Space_MB)
 EXEC sp_msforeachdb 'use [?]; 
   select DB_NAME() AS DbName, 
     CONVERT(varchar(20),DatabasePropertyEx(''?'',''Status'')) ,  
@@ -110,27 +103,15 @@ SUM( size)/128.0 - sum(CAST(FILEPROPERTY(name,''SpaceUsed'') AS INT))/128.0 AS F
 from sys.database_files  where type=0 group by type'
 
 
-
-
-
-GO
-
 -- log file size
-
-IF EXISTS (SELECT
-    *
-  FROM tempdb.sys.all_objects
-  WHERE name LIKE '#logsize%')
-  DROP TABLE #logsize
-CREATE TABLE #logsize (
+DECLARE @logsize TABLE (
   Dbname sysname,
   Log_File_Size_MB decimal(38, 2) DEFAULT (0),
   log_Space_Used_MB decimal(30, 2) DEFAULT (0),
   log_Free_Space_MB decimal(30, 2) DEFAULT (0)
 )
-GO
 
-INSERT INTO #logsize (Dbname, Log_File_Size_MB, log_Space_Used_MB, log_Free_Space_MB)
+INSERT INTO @logsize (Dbname, Log_File_Size_MB, log_Space_Used_MB, log_Free_Space_MB)
 EXEC sp_msforeachdb 'use [?]; 
   select DB_NAME() AS DbName, 
 sum(size)/128.0 AS Log_File_Size_MB, 
@@ -138,23 +119,13 @@ sum(CAST(FILEPROPERTY(name, ''SpaceUsed'') AS INT))/128.0 as log_Space_Used_MB,
 SUM( size)/128.0 - sum(CAST(FILEPROPERTY(name,''SpaceUsed'') AS INT))/128.0 AS log_Free_Space_MB  
 from sys.database_files  where type=1 group by type'
 
-
-GO
-
 -- database free size 
-
-IF EXISTS (SELECT
-    *
-  FROM tempdb.sys.all_objects
-  WHERE name LIKE '%#dbfreesize%')
-  DROP TABLE #dbfreesize
-CREATE TABLE #dbfreesize (
+DECLARE @dbfreesize TABLE (
   name sysname,
   database_size varchar(50),
   Freespace varchar(50) DEFAULT (0.00)
 )
-
-INSERT INTO #dbfreesize (name, database_size, Freespace)
+INSERT INTO @dbfreesize (name, database_size, Freespace)
 EXEC sp_msforeachdb 'use [?];SELECT database_name = db_name() 
     ,database_size = ltrim(str((convert(DECIMAL(15, 2), dbsize) + convert(DECIMAL(15, 2), logsize)) * 8192 / 1048576, 15, 2) + ''MB'') 
     ,''unallocated space'' = ltrim(str(( 
@@ -206,14 +177,8 @@ FROM (
 ) AS partitions'
 
 
+DECLARE @alldbstate TABLE (
 
-
-IF EXISTS (SELECT
-    *
-  FROM tempdb.sys.all_objects
-  WHERE name LIKE '%#alldbstate%')
-  DROP TABLE #alldbstate
-CREATE TABLE #alldbstate (
   dbname sysname,
   DBstatus varchar(55),
   R_model varchar(30)
@@ -221,32 +186,32 @@ CREATE TABLE #alldbstate (
 
 --select * from sys.master_files 
 
-INSERT INTO #alldbstate (dbname, DBstatus, R_model)
+INSERT INTO @alldbstate (dbname, DBstatus, R_model)
   SELECT
     name,
     CONVERT(varchar(20), DATABASEPROPERTYEX(name, 'status')),
     recovery_model_desc
   FROM sys.databases
---select * from #dbsize 
+--select * from @dbsize 
 
-INSERT INTO #dbsize (Dbname, dbstatus, Recovery_Model)
+INSERT INTO @dbsize (Dbname, dbstatus, Recovery_Model)
   SELECT
     dbname,
     dbstatus,
     R_model
-  FROM #alldbstate
+  FROM @alldbstate
   WHERE DBstatus <> 'online'
 
-INSERT INTO #logsize (Dbname)
+INSERT INTO @logsize (Dbname)
   SELECT
     dbname
-  FROM #alldbstate
+  FROM @alldbstate
   WHERE DBstatus <> 'online'
 
-INSERT INTO #dbfreesize (name)
+INSERT INTO @dbfreesize (name)
   SELECT
     dbname
-  FROM #alldbstate
+  FROM @alldbstate
   WHERE DBstatus <> 'online'
 
 SELECT
@@ -262,10 +227,9 @@ SELECT
   l.Log_File_Size_MB AS [LDF Size (MB)],
   log_Space_Used_MB AS [LDF Used (MB)],
   l.log_Free_Space_MB AS [LDF Free (MB)]
-FROM #dbsize d
-JOIN #logsize l
+FROM @dbsize d
+JOIN @logsize l
   ON d.Dbname = l.Dbname
-JOIN #dbfreesize fs
+JOIN @dbfreesize fs
   ON d.Dbname = fs.name
 ORDER BY [Database Name] ASC
-
