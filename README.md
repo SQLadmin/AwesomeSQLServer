@@ -2,15 +2,16 @@
 
 A big collection of SQL Server Queries and documeantations to fix your SQL Server's bottle neck
 
-## Index
 
-### Resource Monitoring
+## Monitoring
 
-* [Monitor CPU Usgae](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/CPU%20Monitoring.sql)
+* ### Resource Monitoring
 
-* [Monitor Memory Usage](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/Memory%20Monitoring.sql)
-* [Monitor Disk Usgae](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/Disk%20Space%20Monitoring.sql)
+	* [Monitor CPU Usgae](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/CPU%20Monitoring.sql)
+	
+	* [Monitor Memory Usage](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/Memory%20Monitoring.sql)
+	* [Monitor Disk Usgae](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/Disk%20Space%20Monitoring.sql)
 
-###  Session Monitoring
+* ###  Session Monitoring
 
-* [sp_whoisactive](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/sp_whoisactive.sql)
+	* [sp_whoisactive](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/sp_whoisactive.sql)
