@@ -5,7 +5,7 @@ writtern by Paul Randal.
 
 --==========================================--
 /*** 1. Monitor IO on databases files from 
-the serverStarting or Database Online ***/
+the server starting or Database Online ***/
 --==========================================--
 
 SELECT
