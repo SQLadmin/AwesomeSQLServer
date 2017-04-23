@@ -61,6 +61,8 @@ GO
 /*** 2. Monitor IO For particular period ***/
 --==========================================--
 -- In line 41 you can mention the time period
+-- ie; WAITFOR DELAY '00:30:00';
+
 
 IF EXISTS (SELECT
     *
