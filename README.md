@@ -8,3 +8,4 @@ A big collection of SQL Server Queries and documeantations to fix your SQL Serve
 * [Monitor Disk Usgae](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/Disk%20Space%20Monitoring.sql)
 * [Session Monitoring](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/Session%20Monitoring.sql)
 * [Blocking, Deadlock Monitoring](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/Blocking%20Monitoring.sql)
+* [IO Monitoring](https://github.com/SqlAdmin/AwesomeSQLServer/blob/master/T-SQL%20Scripts/IO%20Monitoring.sql)
