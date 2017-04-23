@@ -67,14 +67,14 @@ GO
 IF EXISTS (SELECT
     *
   FROM [tempdb].[sys].[objects]
-  WHERE [name] = N'##SQLskillsStats1')
-  DROP TABLE [##SQLskillsStats1];
+  WHERE [name] = N'##Stats1')
+  DROP TABLE [##Stats1];
 
 IF EXISTS (SELECT
     *
   FROM [tempdb].[sys].[objects]
-  WHERE [name] = N'##SQLskillsStats2')
-  DROP TABLE [##SQLskillsStats2];
+  WHERE [name] = N'##Stats2')
+  DROP TABLE [##Stats2];
 GO
 
 SELECT
@@ -87,11 +87,11 @@ SELECT
   [io_stall],
   [num_of_bytes_read],
   [num_of_bytes_written],
-  [file_handle] INTO ##SQLskillsStats1
+  [file_handle] INTO ##Stats1
 FROM sys.dm_io_virtual_file_stats(NULL, NULL);
 GO
 
-WAITFOR DELAY '00:30:00';
+WAITFOR DELAY '00:00:30';
 GO
 
 SELECT
@@ -104,7 +104,7 @@ SELECT
   [io_stall],
   [num_of_bytes_read],
   [num_of_bytes_written],
-  [file_handle] INTO ##SQLskillsStats2
+  [file_handle] INTO ##Stats2
 FROM sys.dm_io_virtual_file_stats(NULL, NULL);
 GO
 
@@ -120,8 +120,8 @@ AS (SELECT
   [ts2].[io_stall],
   [ts2].[num_of_bytes_read],
   [ts2].[num_of_bytes_written]
-FROM [##SQLskillsStats2] AS [ts2]
-LEFT OUTER JOIN [##SQLskillsStats1] AS [ts1]
+FROM [##Stats2] AS [ts2]
+LEFT OUTER JOIN [##Stats1] AS [ts1]
   ON [ts2].[file_handle] = [ts1].[file_handle]
 WHERE [ts1].[file_handle] IS NULL
 UNION
@@ -136,8 +136,8 @@ SELECT
   [ts2].[io_stall] - [ts1].[io_stall] AS [io_stall],
   [ts2].[num_of_bytes_read] - [ts1].[num_of_bytes_read] AS [num_of_bytes_read],
   [ts2].[num_of_bytes_written] - [ts1].[num_of_bytes_written] AS [num_of_bytes_written]
-FROM [##SQLskillsStats2] AS [ts2]
-LEFT OUTER JOIN [##SQLskillsStats1] AS [ts1]
+FROM [##Stats2] AS [ts2]
+LEFT OUTER JOIN [##Stats1] AS [ts1]
   ON [ts2].[file_handle] = [ts1].[file_handle]
 WHERE [ts1].[file_handle] IS NOT NULL)
 SELECT
@@ -187,12 +187,12 @@ GO
 IF EXISTS (SELECT
     *
   FROM [tempdb].[sys].[objects]
-  WHERE [name] = N'##SQLskillsStats1')
-  DROP TABLE [##SQLskillsStats1];
+  WHERE [name] = N'##Stats1')
+  DROP TABLE [##Stats1];
 
 IF EXISTS (SELECT
     *
   FROM [tempdb].[sys].[objects]
-  WHERE [name] = N'##SQLskillsStats2')
-  DROP TABLE [##SQLskillsStats2];
+  WHERE [name] = N'##Stats2')
+  DROP TABLE [##Stats2];
 GO
