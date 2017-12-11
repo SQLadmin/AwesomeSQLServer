@@ -1,4 +1,9 @@
-USE master
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_PADDING ON;
+SET CONCAT_NULL_YIELDS_NULL ON;
+SET ANSI_WARNINGS ON;
+SET NUMERIC_ROUNDABORT OFF;
+SET ARITHABORT ON;
 GO
 
 IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_NAME = 'sp_WhoIsActive')
@@ -6,11 +11,12 @@ IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_NAME = 's
 GO
 
 /*********************************************************************************************
-Who Is Active? v11.17 (2016-10-18)
-(C) 2007-2016, Adam Machanic
+Who Is Active? v11.30 (2017-12-10)
+(C) 2007-2017, Adam Machanic
 
-Feedback: mailto:amachanic@gmail.com
+Feedback: mailto:adam@dataeducation.com
 Updates: http://whoisactive.com
+Blog: http://dataeducation.com
 
 License: 
 	Who is Active? is free to download and use for personal, educational, and internal 
@@ -107,12 +113,12 @@ ALTER PROC dbo.sp_WhoIsActive
 
 	--Column(s) by which to sort output, optionally with sort directions. 
 		--Valid column choices:
-		--session_id, physical_io, reads, physical_reads, writes, tempdb_allocations,
-		--tempdb_current, CPU, context_switches, used_memory, physical_io_delta, 
-		--reads_delta, physical_reads_delta, writes_delta, tempdb_allocations_delta, 
-		--tempdb_current_delta, CPU_delta, context_switches_delta, used_memory_delta, 
-		--tasks, tran_start_time, open_tran_count, blocking_session_id, blocked_session_count,
-		--percent_complete, host_name, login_name, database_name, start_time, login_time
+		--session_id, physical_io, reads, physical_reads, writes, tempdb_allocations, 
+		--tempdb_current, CPU, context_switches, used_memory, physical_io_delta, reads_delta, 
+		--physical_reads_delta, writes_delta, tempdb_allocations_delta, tempdb_current_delta, 
+		--CPU_delta, context_switches_delta, used_memory_delta, tasks, tran_start_time, 
+		--open_tran_count, blocking_session_id, blocked_session_count, percent_complete, 
+		--host_name, login_name, database_name, start_time, login_time, program_name
 		--
 		--Note that column names in the list must be bracket-delimited. Commas and/or white
 		--space are not required. 
@@ -1171,6 +1177,8 @@ BEGIN;
 			SELECT '[start_time]'
 			UNION ALL
 			SELECT '[login_time]'
+			UNION ALL
+			SELECT '[program_name]'
 		) AS x ON 
 			x.column_name LIKE token ESCAPE '|'
 	)
@@ -1275,6 +1283,8 @@ BEGIN;
 
 		DECLARE @first_collection_ms_ticks BIGINT;
 		DECLARE @last_collection_start DATETIME;
+		DECLARE @sys_info BIT;
+		SET @sys_info = ISNULL(CONVERT(BIT, SIGN(OBJECT_ID('sys.dm_os_sys_info'))), 0);
 
 		--Used for the delta pull
 		REDO:;
@@ -2321,6 +2331,7 @@ BEGIN;
 					WHEN 
 						@output_column_list LIKE '%|[CPU_delta|]%' ESCAPE '|'
 						AND @get_task_info = 2
+						AND @sys_info = 1
 							THEN 
 								'x.thread_CPU_snapshot '
 					ELSE 
@@ -2589,8 +2600,16 @@ BEGIN;
 										x.deadlock_priority,
 										x.row_count,
 										x.command_type, 
-										master.dbo.fn_varbintohexstr(x.sql_handle) AS sql_handle,
-										master.dbo.fn_varbintohexstr(x.plan_handle) AS plan_handle,
+										' +
+										CASE
+											WHEN OBJECT_ID('master.dbo.fn_varbintohexstr') IS NOT NULL THEN
+												'master.dbo.fn_varbintohexstr(x.sql_handle) AS sql_handle,
+												master.dbo.fn_varbintohexstr(x.plan_handle) AS plan_handle,'
+											ELSE
+												'CONVERT(VARCHAR(256), x.sql_handle, 1) AS sql_handle,
+												CONVERT(VARCHAR(256), x.plan_handle, 1) AS plan_handle,'
+										END +
+										'
 										' +
 										CASE
 											WHEN @output_column_list LIKE '%|[program_name|]%' ESCAPE '|' THEN
@@ -2633,8 +2652,9 @@ BEGIN;
 												'
 											ELSE
 												''
-										END +
-										'x.host_process_id 
+										END + '
+										x.host_process_id,
+										x.group_id
 									FOR XML
 										PATH(''additional_info''),
 										TYPE
@@ -2823,11 +2843,7 @@ BEGIN;
 									)
 							END,
 							NULLIF(COALESCE(r.start_time, sp.last_request_end_time), CONVERT(DATETIME, ''19000101'', 112)),
-							(
-								SELECT TOP(1)
-									DATEADD(second, -(ms_ticks / 1000), GETDATE())
-								FROM sys.dm_os_sys_info
-							)
+							sp.login_time
 						) AS start_time,
 						sp.login_time,
 						CASE
@@ -2847,7 +2863,21 @@ BEGIN;
 						END AS last_request_start_time,
 						r.transaction_id,
 						sp.database_id,
-						sp.open_tran_count
+						sp.open_tran_count,
+						' +
+							CASE
+								WHEN EXISTS
+								(
+									SELECT
+										*
+									FROM sys.all_columns AS ac
+									WHERE
+										ac.object_id = OBJECT_ID('sys.dm_exec_sessions')
+										AND ac.name = 'group_id'
+								)
+									THEN 's.group_id'
+								ELSE 'CONVERT(INT, NULL) AS group_id'
+							END + '
 					FROM @sessions AS sp
 					LEFT OUTER LOOP JOIN sys.dm_exec_sessions AS s ON
 						s.session_id = sp.session_id
@@ -3021,7 +3051,9 @@ BEGIN;
 													SUM(CONVERT(BIGINT, t.context_switches_count)) OVER (PARTITION BY t.session_id, t.request_id) AS context_switches, 
 													' +
 													CASE
-														WHEN @output_column_list LIKE '%|[CPU_delta|]%' ESCAPE '|'
+														WHEN 
+															@output_column_list LIKE '%|[CPU_delta|]%' ESCAPE '|'
+															AND @sys_info = 1
 															THEN
 																'SUM(tr.usermode_time + tr.kernel_time) OVER (PARTITION BY t.session_id, t.request_id) '
 														ELSE
@@ -3051,26 +3083,41 @@ BEGIN;
 														AND sp2.status <> ''sleeping''
 												) AS sp20
 												LEFT OUTER HASH JOIN
-												(
-													SELECT TOP(@i)
-														(
-															SELECT TOP(@i)
-																ms_ticks
-															FROM sys.dm_os_sys_info
-														) -
-															w0.wait_resumed_ms_ticks AS runnable_time,
-														w0.worker_address,
-														w0.thread_address,
-														w0.task_bound_ms_ticks
-													FROM sys.dm_os_workers AS w0
-													WHERE
-														w0.state = ''RUNNABLE''
-														OR @first_collection_ms_ticks >= w0.task_bound_ms_ticks
+												( 
+												' +
+													CASE
+														WHEN @sys_info = 1 THEN
+															'SELECT TOP(@i)
+																(
+																	SELECT TOP(@i)
+																		ms_ticks
+																	FROM sys.dm_os_sys_info
+																) -
+																	w0.wait_resumed_ms_ticks AS runnable_time,
+																w0.worker_address,
+																w0.thread_address,
+																w0.task_bound_ms_ticks
+															FROM sys.dm_os_workers AS w0
+															WHERE
+																w0.state = ''RUNNABLE''
+																OR @first_collection_ms_ticks >= w0.task_bound_ms_ticks'
+														ELSE
+															'SELECT
+																CONVERT(BIGINT, NULL) AS runnable_time,
+																CONVERT(VARBINARY(8), NULL) AS worker_address,
+																CONVERT(VARBINARY(8), NULL) AS thread_address,
+																CONVERT(BIGINT, NULL) AS task_bound_ms_ticks
+															WHERE
+																1 = 0'
+														END +
+												'
 												) AS w ON
 													w.worker_address = t.worker_address 
 												' +
 												CASE
-													WHEN @output_column_list LIKE '%|[CPU_delta|]%' ESCAPE '|'
+													WHEN
+														@output_column_list LIKE '%|[CPU_delta|]%' ESCAPE '|'
+														AND @sys_info = 1
 														THEN
 															'LEFT OUTER HASH JOIN sys.dm_os_threads AS tr ON
 																tr.thread_address = w.thread_address
@@ -3370,7 +3417,9 @@ BEGIN;
 
 		SET @last_collection_start = GETDATE();
 
-		IF @recursion = -1
+		IF 
+			@recursion = -1
+			AND @sys_info = 1
 		BEGIN;
 			SELECT
 				@first_collection_ms_ticks = ms_ticks
@@ -3903,6 +3952,9 @@ BEGIN;
 			AND @recursion = 1
 			AND @output_column_list LIKE '%|[query_plan|]%' ESCAPE '|'
 		BEGIN;
+			DECLARE @live_plan BIT;
+			SET @live_plan = ISNULL(CONVERT(BIT, SIGN(OBJECT_ID('sys.dm_exec_query_statistics_xml'))), 0)
+
 			DECLARE plan_cursor
 			CURSOR LOCAL FAST_FORWARD
 			FOR 
@@ -3933,51 +3985,54 @@ BEGIN;
 
 			WHILE @@FETCH_STATUS = 0
 			BEGIN;
-				BEGIN TRY;
-					UPDATE s
-					SET
-						s.query_plan =
-						(
-							SELECT
-								CONVERT(xml, query_plan)
-							FROM sys.dm_exec_text_query_plan
+				DECLARE @query_plan XML;
+				IF @live_plan = 1
+				BEGIN;
+					BEGIN TRY;
+						SELECT
+							@query_plan = x.query_plan
+						FROM sys.dm_exec_query_statistics_xml(@session_id) AS x;
+
+						IF 
+							@query_plan IS NOT NULL
+							AND EXISTS
 							(
-								@plan_handle, 
-								CASE @get_plans
-									WHEN 1 THEN
-										@statement_start_offset
-									ELSE
-										0
-								END, 
-								CASE @get_plans
-									WHEN 1 THEN
-										@statement_end_offset
-									ELSE
-										-1
-								END
+								SELECT
+									*
+								FROM sys.dm_exec_requests AS r
+								WHERE
+									r.session_id = @session_id
+									AND r.request_id = @request_id
+									AND r.plan_handle = @plan_handle
+									AND r.statement_start_offset = @statement_start_offset
+									AND r.statement_end_offset = @statement_end_offset
 							)
-						)
-					FROM #sessions AS s
-					WHERE 
-						s.session_id = @session_id
-						AND s.request_id = @request_id
-						AND s.recursion = 1
-					OPTION (KEEPFIXED PLAN);
-				END TRY
-				BEGIN CATCH;
-					IF ERROR_NUMBER() = 6335
-					BEGIN;
+						BEGIN;
+							UPDATE s
+							SET
+								s.query_plan = @query_plan
+							FROM #sessions AS s
+							WHERE 
+								s.session_id = @session_id
+								AND s.request_id = @request_id
+								AND s.recursion = 1
+							OPTION (KEEPFIXED PLAN);
+						END;
+					END TRY
+					BEGIN CATCH;
+						SET @query_plan = NULL;
+					END CATCH;
+				END;
+
+				IF @query_plan IS NULL
+				BEGIN;
+					BEGIN TRY;
 						UPDATE s
 						SET
 							s.query_plan =
 							(
 								SELECT
-									N'--' + NCHAR(13) + NCHAR(10) + 
-									N'-- Could not render showplan due to XML data type limitations. ' + NCHAR(13) + NCHAR(10) + 
-									N'-- To see the graphical plan save the XML below as a .SQLPLAN file and re-open in SSMS.' + NCHAR(13) + NCHAR(10) +
-									N'--' + NCHAR(13) + NCHAR(10) +
-										REPLACE(qp.query_plan, N'<RelOp', NCHAR(13)+NCHAR(10)+N'<RelOp') + 
-										NCHAR(13) + NCHAR(10) + N'--' COLLATE Latin1_General_Bin2 AS [processing-instruction(query_plan)]
+									CONVERT(xml, query_plan)
 								FROM sys.dm_exec_text_query_plan
 								(
 									@plan_handle, 
@@ -3993,10 +4048,7 @@ BEGIN;
 										ELSE
 											-1
 									END
-								) AS qp
-								FOR XML
-									PATH(''),
-									TYPE
+								)
 							)
 						FROM #sessions AS s
 						WHERE 
@@ -4004,24 +4056,66 @@ BEGIN;
 							AND s.request_id = @request_id
 							AND s.recursion = 1
 						OPTION (KEEPFIXED PLAN);
-					END;
-					ELSE
-					BEGIN;
-						UPDATE s
-						SET
-							s.query_plan = 
-								CASE ERROR_NUMBER() 
-									WHEN 1222 THEN '<timeout_exceeded />'
-									ELSE '<error message="' + ERROR_MESSAGE() + '" />'
-								END
-						FROM #sessions AS s
-						WHERE 
-							s.session_id = @session_id
-							AND s.request_id = @request_id
-							AND s.recursion = 1
-						OPTION (KEEPFIXED PLAN);
-					END;
-				END CATCH;
+					END TRY
+					BEGIN CATCH;
+						IF ERROR_NUMBER() = 6335
+						BEGIN;
+							UPDATE s
+							SET
+								s.query_plan =
+								(
+									SELECT
+										N'--' + NCHAR(13) + NCHAR(10) + 
+										N'-- Could not render showplan due to XML data type limitations. ' + NCHAR(13) + NCHAR(10) + 
+										N'-- To see the graphical plan save the XML below as a .SQLPLAN file and re-open in SSMS.' + NCHAR(13) + NCHAR(10) +
+										N'--' + NCHAR(13) + NCHAR(10) +
+											REPLACE(qp.query_plan, N'<RelOp', NCHAR(13)+NCHAR(10)+N'<RelOp') + 
+											NCHAR(13) + NCHAR(10) + N'--' COLLATE Latin1_General_Bin2 AS [processing-instruction(query_plan)]
+									FROM sys.dm_exec_text_query_plan
+									(
+										@plan_handle, 
+										CASE @get_plans
+											WHEN 1 THEN
+												@statement_start_offset
+											ELSE
+												0
+										END, 
+										CASE @get_plans
+											WHEN 1 THEN
+												@statement_end_offset
+											ELSE
+												-1
+										END
+									) AS qp
+									FOR XML
+										PATH(''),
+										TYPE
+								)
+							FROM #sessions AS s
+							WHERE 
+								s.session_id = @session_id
+								AND s.request_id = @request_id
+								AND s.recursion = 1
+							OPTION (KEEPFIXED PLAN);
+						END;
+						ELSE
+						BEGIN;
+							UPDATE s
+							SET
+								s.query_plan = 
+									CASE ERROR_NUMBER() 
+										WHEN 1222 THEN '<timeout_exceeded />'
+										ELSE '<error message="' + ERROR_MESSAGE() + '" />'
+									END
+							FROM #sessions AS s
+							WHERE 
+								s.session_id = @session_id
+								AND s.request_id = @request_id
+								AND s.recursion = 1
+							OPTION (KEEPFIXED PLAN);
+						END;
+					END CATCH;
+				END;
 
 				FETCH NEXT FROM plan_cursor
 				INTO
@@ -4571,7 +4665,97 @@ BEGIN;
 			@output_column_list LIKE '%|[program_name|]%' ESCAPE '|'
 			AND @output_column_list LIKE '%|[additional_info|]%' ESCAPE '|'
 			AND @recursion = 1
+			AND DB_ID('msdb') IS NOT NULL
 		BEGIN;
+			SET @sql_n =
+				N'BEGIN TRY;
+					DECLARE @job_name sysname;
+					SET @job_name = NULL;
+					DECLARE @step_name sysname;
+					SET @step_name = NULL;
+
+					SELECT
+						@job_name = 
+							REPLACE
+							(
+								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+									j.name,
+									NCHAR(31),N''?''),NCHAR(30),N''?''),NCHAR(29),N''?''),NCHAR(28),N''?''),NCHAR(27),N''?''),NCHAR(26),N''?''),NCHAR(25),N''?''),NCHAR(24),N''?''),NCHAR(23),N''?''),NCHAR(22),N''?''),
+									NCHAR(21),N''?''),NCHAR(20),N''?''),NCHAR(19),N''?''),NCHAR(18),N''?''),NCHAR(17),N''?''),NCHAR(16),N''?''),NCHAR(15),N''?''),NCHAR(14),N''?''),NCHAR(12),N''?''),
+									NCHAR(11),N''?''),NCHAR(8),N''?''),NCHAR(7),N''?''),NCHAR(6),N''?''),NCHAR(5),N''?''),NCHAR(4),N''?''),NCHAR(3),N''?''),NCHAR(2),N''?''),NCHAR(1),N''?''),
+								NCHAR(0),
+								N''?''
+							),
+						@step_name = 
+							REPLACE
+							(
+								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+									s.step_name,
+									NCHAR(31),N''?''),NCHAR(30),N''?''),NCHAR(29),N''?''),NCHAR(28),N''?''),NCHAR(27),N''?''),NCHAR(26),N''?''),NCHAR(25),N''?''),NCHAR(24),N''?''),NCHAR(23),N''?''),NCHAR(22),N''?''),
+									NCHAR(21),N''?''),NCHAR(20),N''?''),NCHAR(19),N''?''),NCHAR(18),N''?''),NCHAR(17),N''?''),NCHAR(16),N''?''),NCHAR(15),N''?''),NCHAR(14),N''?''),NCHAR(12),N''?''),
+									NCHAR(11),N''?''),NCHAR(8),N''?''),NCHAR(7),N''?''),NCHAR(6),N''?''),NCHAR(5),N''?''),NCHAR(4),N''?''),NCHAR(3),N''?''),NCHAR(2),N''?''),NCHAR(1),N''?''),
+								NCHAR(0),
+								N''?''
+							)
+					FROM msdb.dbo.sysjobs AS j
+					INNER JOIN msdb.dbo.sysjobsteps AS s ON
+						j.job_id = s.job_id
+					WHERE
+						j.job_id = @job_id
+						AND s.step_id = @step_id;
+
+					IF @job_name IS NOT NULL
+					BEGIN;
+						UPDATE s
+						SET
+							additional_info.modify
+							(''
+								insert text{sql:variable("@job_name")}
+								into (/additional_info/agent_job_info/job_name)[1]
+							'')
+						FROM #sessions AS s
+						WHERE 
+							s.session_id = @session_id
+							AND s.recursion = 1
+						OPTION (KEEPFIXED PLAN);
+						
+						UPDATE s
+						SET
+							additional_info.modify
+							(''
+								insert text{sql:variable("@step_name")}
+								into (/additional_info/agent_job_info/step_name)[1]
+							'')
+						FROM #sessions AS s
+						WHERE 
+							s.session_id = @session_id
+							AND s.recursion = 1
+						OPTION (KEEPFIXED PLAN);
+					END;
+				END TRY
+				BEGIN CATCH;
+					DECLARE @msdb_error_message NVARCHAR(256);
+					SET @msdb_error_message = ERROR_MESSAGE();
+				
+					UPDATE s
+					SET
+						additional_info.modify
+						(''
+							insert <msdb_query_error>{sql:variable("@msdb_error_message")}</msdb_query_error>
+							as last
+							into (/additional_info/agent_job_info)[1]
+						'')
+					FROM #sessions AS s
+					WHERE 
+						s.session_id = @session_id
+						AND s.recursion = 1
+					OPTION (KEEPFIXED PLAN);
+				END CATCH;'
+
 			DECLARE @job_id UNIQUEIDENTIFIER;
 			DECLARE @step_id INT;
 
@@ -4598,91 +4782,10 @@ BEGIN;
 
 			WHILE @@FETCH_STATUS = 0
 			BEGIN;
-				BEGIN TRY;
-					DECLARE @job_name sysname;
-					SET @job_name = NULL;
-					DECLARE @step_name sysname;
-					SET @step_name = NULL;
-					
-					SELECT
-						@job_name = 
-							REPLACE
-							(
-								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-									j.name,
-									NCHAR(31),N'?'),NCHAR(30),N'?'),NCHAR(29),N'?'),NCHAR(28),N'?'),NCHAR(27),N'?'),NCHAR(26),N'?'),NCHAR(25),N'?'),NCHAR(24),N'?'),NCHAR(23),N'?'),NCHAR(22),N'?'),
-									NCHAR(21),N'?'),NCHAR(20),N'?'),NCHAR(19),N'?'),NCHAR(18),N'?'),NCHAR(17),N'?'),NCHAR(16),N'?'),NCHAR(15),N'?'),NCHAR(14),N'?'),NCHAR(12),N'?'),
-									NCHAR(11),N'?'),NCHAR(8),N'?'),NCHAR(7),N'?'),NCHAR(6),N'?'),NCHAR(5),N'?'),NCHAR(4),N'?'),NCHAR(3),N'?'),NCHAR(2),N'?'),NCHAR(1),N'?'),
-								NCHAR(0),
-								N'?'
-							),
-						@step_name = 
-							REPLACE
-							(
-								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-								REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-									s.step_name,
-									NCHAR(31),N'?'),NCHAR(30),N'?'),NCHAR(29),N'?'),NCHAR(28),N'?'),NCHAR(27),N'?'),NCHAR(26),N'?'),NCHAR(25),N'?'),NCHAR(24),N'?'),NCHAR(23),N'?'),NCHAR(22),N'?'),
-									NCHAR(21),N'?'),NCHAR(20),N'?'),NCHAR(19),N'?'),NCHAR(18),N'?'),NCHAR(17),N'?'),NCHAR(16),N'?'),NCHAR(15),N'?'),NCHAR(14),N'?'),NCHAR(12),N'?'),
-									NCHAR(11),N'?'),NCHAR(8),N'?'),NCHAR(7),N'?'),NCHAR(6),N'?'),NCHAR(5),N'?'),NCHAR(4),N'?'),NCHAR(3),N'?'),NCHAR(2),N'?'),NCHAR(1),N'?'),
-								NCHAR(0),
-								N'?'
-							)
-					FROM msdb.dbo.sysjobs AS j
-					INNER JOIN msdb..sysjobsteps AS s ON
-						j.job_id = s.job_id
-					WHERE
-						j.job_id = @job_id
-						AND s.step_id = @step_id;
-
-					IF @job_name IS NOT NULL
-					BEGIN;
-						UPDATE s
-						SET
-							additional_info.modify
-							('
-								insert text{sql:variable("@job_name")}
-								into (/additional_info/agent_job_info/job_name)[1]
-							')
-						FROM #sessions AS s
-						WHERE 
-							s.session_id = @session_id
-						OPTION (KEEPFIXED PLAN);
-						
-						UPDATE s
-						SET
-							additional_info.modify
-							('
-								insert text{sql:variable("@step_name")}
-								into (/additional_info/agent_job_info/step_name)[1]
-							')
-						FROM #sessions AS s
-						WHERE 
-							s.session_id = @session_id
-						OPTION (KEEPFIXED PLAN);
-					END;
-				END TRY
-				BEGIN CATCH;
-					DECLARE @msdb_error_message NVARCHAR(256);
-					SET @msdb_error_message = ERROR_MESSAGE();
-				
-					UPDATE s
-					SET
-						additional_info.modify
-						('
-							insert <msdb_query_error>{sql:variable("@msdb_error_message")}</msdb_query_error>
-							as last
-							into (/additional_info/agent_job_info)[1]
-						')
-					FROM #sessions AS s
-					WHERE 
-						s.session_id = @session_id
-						AND s.recursion = 1
-					OPTION (KEEPFIXED PLAN);
-				END CATCH;
+				EXEC sp_executesql
+					@sql_n,
+					N'@job_id UNIQUEIDENTIFIER, @step_id INT, @session_id SMALLINT',
+					@job_id, @step_id, @session_id
 
 				FETCH NEXT FROM agent_cursor
 				INTO 
